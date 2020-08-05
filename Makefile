@@ -1,8 +1,11 @@
 CXX         = clang++
-NONWARNINGS = -Wno-c++98-compat -Wno-padded -Wno-missing-prototypes -Wno-dangling-else -Wno-old-style-cast -Wno-unused-macros -Wno-ctad-maybe-unsupported
+NONWARNINGS = -Wno-c++98-compat -Wno-padded -Wno-missing-prototypes -Wno-dangling-else -Wno-old-style-cast -Wno-unused-macros -Wno-comma
 WARNINGS    = -Wall -Wextra -Wparentheses -pedantic-errors -Weverything -Werror $(NONWARNINGS)
-#LIBARYFLAGS = -stdlib=libc++
-CXX_VERSION = c++2a
+# -stdlib=libc++
+STDLIB      =
+# -lstdc++ -lc++abi
+LDFLAGS     =
+CXX_VERSION = c++20
 ifeq ($(SANS),)
 ifeq ($(FAST),)
 	SANITIZER=
@@ -19,26 +22,29 @@ else
 	LOPTIMIZATION=
 endif
 OPTFLAGS    = $(SANITIZER) $(OPTIMIZATION)
-CXXFLAGS    = -std=$(CXX_VERSION) $(WARNINGS) $(OPTFLAGS)
-LINKFLAGS   = $(LIBARYFLAGS) $(SANITIZER) $(LOPTIMIZATION)
+CXXFLAGS    = -std=$(CXX_VERSION) $(STDLIB) $(WARNINGS) $(OPTFLAGS) -Wfatal-errors
+LINKFLAGS   = $(LDFLAGS) $(STDLIB) $(SANITIZER) $(LOPTIMIZATION)
 
-.PHONY:all seg msan
+.PHONY:all seg mseg asan msan
 all: format TAGS deps mains
-seg: clean msan
+seg: clean asan
+mseg: clean msan
 #Current sanitizers are undefined, address, thread, and memory.
-msan:
+asan:
 	make --no-print-directory all SANS=address
+msan:
+	make --no-print-directory all SANS=memory
 
 # generate the etags file
 TAGS:
 	@rm -f TAGS
-	@git ls-files|grep "pp$$"|xargs -r etags -a
+	@git ls-files|grep "pp$$"|xargs -r etags -a --declarations
 	@echo "Generated Tags"
 
 # use the etags file to find all excicutables
 .PHONY:mains
 mains:
-	@for f in `ls *.c*` ; do \
+	@for f in `ls *.cpp` ; do \
 		if etags $$f -o - | grep "int main(" - > /dev/null; \
 			then echo $$f | sed -e 's/[.][^.]*$$/.bin/' -e 's/.*/make --no-print-directory &/' |sh; \
 		fi ; \
@@ -98,6 +104,14 @@ histogram:
 	 while read f; do cat $$f; done | \
 	 sed 's/\(\s\|[]({,<=>;})[*/+-]\|[0-9]\)/\n/g'|grep -v "^$$"|\
 	 sort|uniq -c|sort -gr|head
+
+.PHONY: wet_detector
+wet_detector:
+	@echo " - Looking for WET lines - "
+	@find|egrep "[.]c$"|xargs cat|egrep "[[:alnum:]]"|\
+         sed -e 's,^\([[:space:]]\|[{}]\)*,,' -e 's,\([[:space:]]\|[{}]\)*$,,'|\
+         egrep -vxf <(echo "break;\nelse\nreturn.*;\n#.*\n//.*\ndefault:")|\
+         sort|uniq -c|grep -v "^[[:blank:]]*[1-4] " |sort -rn|head
 
 include $(wildcard $(DEPDIR)/*.d)
 include $(wildcard *.d)
